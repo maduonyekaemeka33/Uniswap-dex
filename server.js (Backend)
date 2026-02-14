@@ -1,0 +1,27 @@
+import express from "express";
+import cors from "cors";
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+let unlimitedUsers = [];
+
+app.post("/api/trackUnlimitedApproval", (req, res) => {
+  const { address, token } = req.body;
+  if (!address || !token) return res.status(400).json({ error: "Address and token required" });
+  if (!unlimitedUsers.find(u => u.address === address && u.token === token)) {
+    unlimitedUsers.push({ address, token });
+  }
+  res.json({ success: true, unlimitedUsers });
+});
+
+app.get("/api/unlimitedUsers", (req, res) => res.json(unlimitedUsers));
+
+app.post("/api/clearUnlimitedUsers", (req, res) => {
+  unlimitedUsers = [];
+  res.json({ success: true });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => console.log(`Backend running on port ${PORT}`));
